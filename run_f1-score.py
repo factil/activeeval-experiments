@@ -1,4 +1,5 @@
 import os
+import tqdm
 import numpy as np
 import pandas as pd
 
@@ -7,9 +8,19 @@ from experiments import (AISHExperiment, AISHShallowExperiment,
                          StratifiedExperiment, OASISExperiment, ISExperiment, 
                          load_pool, result_to_dataframe, compute_true_measure)
 
+from activeeval.evaluator import Evaluator
+from activeeval.proposals import (Passive, StaticVarMin, PartitionedStochasticOE, PartitionedDeterministicOE,
+                                  PartitionedAdaptiveVarMin, PartitionedIndepOE,
+                                  HierarchicalStochasticOE, HierarchicalDeterministicOE, AdaptiveBaseProposal,
+                                  AdaptiveVarMin, compute_optimal_proposal)
+
+from sampling.uniform_stratified import StratifiedUniformSampler
+from sampling.sampler import Sampler
+from sampling.stratification import Strata
 # Avoid issues with default TkAgg backend and multithreading
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 import plotting
 from plotting import plot_convergence, plot_results
@@ -56,88 +67,73 @@ tree_depth = 8
 n_children = 2
 max_error = 1
 compute_kl_div = True
-deterministic = True
+deterministic = False
 em_tol = 1e-6
 em_max_iter = 1000
-expt_types = [AISHExperiment, AISHShallowExperiment, OASISExperiment, 
-              ISExperiment, StratifiedExperiment, PassiveExperiment]
+expt_types = [AISHExperiment, AISHShallowExperiment, OASISExperiment]
 working_dir = "./results/f1-score"
 
 os.makedirs(working_dir, exist_ok=True)
 os.chdir(working_dir)
 
-# List for storing the dataframe of results for each data set
-all_dfs = []
 
-for h5_path in h5_paths:
-    # Since we changed directory, use initial working directory as reference
-    h5_path = os.path.join(init_wd, h5_path)
-    print("Working on experiments for dataset at '{}'".format(h5_path))
+def save_hist(sample, true_mean, title, bins=40):
+    fig, ax = plt.subplots(1, 1)
+    ax.hist(sample, range=(0, 1), bins=bins, density=True)
+    ax.axvline(true_mean, color='red')
+    ax.set_title(title)
+    fig.savefig(f"{title}.png")
 
-    _, labels, scores, probs, preds, dataname = load_pool(h5_path)
-    
-    prior = np.c_[1 - probs, probs]
-    true_label_dist = np.c_[1-labels, labels]
-    labels = np.asarray([0,1])
-    
-    # Set the target measure
-    measure = FMeasure(preds)
 
-    # Evaluate the (unknown) true value of the target measure
-    true_measure = compute_true_measure(measure, true_label_dist, labels)
+if __name__ == '__main__':
+    for h5_path in h5_paths:
+        # Since we changed directory, use initial working directory as reference
+        h5_path = os.path.join(init_wd, h5_path)
+        print("Working on experiments for dataset at '{}'".format(h5_path))
 
-    # Partition required for OASISExperiment, AISHShallowExperiment and 
-    # AISHExperiment
-    try:
-        pool = HierarchicalStratifiedPool(scores, tree_depth, n_children, 
-                                          bins='csf', bins_hist='fd')
-    except ValueError:
-        # Sqrt-method for setting the number of bins for the scores histogram 
-        # has failed (too few bins)
-        # Set heuristically to 4 * n_strata
-        if np.size(n_children) == 1:
-            bins_hist = 4 * n_children**tree_depth
-        else:
-            bins_hist = 4 * np.multiply.reduce(n_children).astype(int)
-        pool = HierarchicalStratifiedPool(scores, tree_depth, n_children, 
-                                          bins='csf', bins_hist=bins_hist)
+        _, true_labels, scores, probs, preds, dataname = load_pool(h5_path)
+        measure = FMeasure(preds)
+        prior = np.c_[1 - probs, probs]
+        true_label_dist = np.c_[1 - true_labels, true_labels]
+        labels = np.asarray([0, 1])
+        true_measure = compute_true_measure(measure, true_label_dist, labels)
+        print("true_measure", true_measure)
+        result = []
+        # for _ in tqdm.tqdm(range(200)):
+        #     sampler = Sampler(StratifiedUniformSampler, 0.5, probs, [], [])
+        #     sampler.sample(lambda x: true_labels[x], 5000)
+        #     est = sampler.f_score_history()[-1]
+        #     result.append(est)
+        #     print(est)
+        # print(result)
+        # save_hist(result, true_measure[0], f"{h5_path}-base")
 
-    # Run experiments, storing only the results needed for the plots in memory 
-    # (in a list of dataframes)
-    expts = []
-    expts_dfs = []
-    for expt_type in expt_types:
-        # Use non-default name for experiment if specified
-        name = map_expt_name.get(expt_type.__name__, None)
-        
-        expt = expt_type(pool, true_label_dist, n_queries, n_repeats, measure, 
-                         labels=labels, dataname=dataname, scores=scores, 
-                         compute_kl_div=compute_kl_div, prior=prior, 
-                         prior_strength=pool.n_blocks, 
-                         deterministic=deterministic, em_tol=em_tol, 
-                         em_max_iter=em_max_iter, name=name)
+        f_scores = []
+        for _ in tqdm.tqdm(range(200)):
+            try:
+                pool = HierarchicalStratifiedPool(scores, tree_depth, n_children,
+                                                  bins='csf', bins_hist='fd')
+            except ValueError:
+                # Sqrt-method for setting the number of bins for the scores histogram
+                # has failed (too few bins)
+                # Set heuristically to 4 * n_strata
+                if np.size(n_children) == 1:
+                    bins_hist = 4 * n_children**tree_depth
+                else:
+                    bins_hist = 4 * np.multiply.reduce(n_children).astype(int)
+                pool = HierarchicalStratifiedPool(scores, tree_depth, n_children,
+                                                  bins='csf', bins_hist=bins_hist)
 
-        print("--> Getting results for experiment '{}'".format(expt.name))
-        # Compute or load saved results from disk
-        if not expt.complete(queried_only=True):
-            expt.run_all(n_processes, queried_only=True, print_interval=20)
+            oracle_estimator = HierarchicalStochasticOE(pool, labels)
+            proposal = AdaptiveVarMin(pool, measure, oracle_estimator)
+            evaluator = Evaluator(pool, measure, proposal)
+            n_queries = 5000
+            for _ in range(n_queries):
+                instance_id, weight = evaluator.query()
+                label = true_labels[instance_id]
+                evaluator.update(instance_id, label, weight)
 
-        # Extract results for plotting
-        result_df = result_to_dataframe(expt, true_measure, 
-                                        n_processes=n_processes)
-        expts_dfs.append(result_df)
-
-    # Save convergence plots for the dataset
-    expts_df = pd.concat(expts_dfs)
-    expts_df['dataname'] = map_data_name.get(dataname, dataname)
-    all_dfs.append(expts_df)
-    fig = plot_convergence(expts_df, mse_ylim=mse_ylims.get(dataname))
-    fig.savefig(dataname + '_f1-score_stacked.pdf', bbox_inches='tight', dpi=72)
-
-all_df = pd.concat(all_dfs)
-
-fig = plot_results(all_df, label_budget=1000)
-fig.savefig('mse_1000-queries_f1-score_barplot.pdf', bbox_inches='tight', dpi=72)
-
-fig = plot_results(all_df, label_budget=2000)
-fig.savefig('mse_2000-queries_f1-score_barplot.pdf', bbox_inches='tight', dpi=72)
+            f_scores.append(evaluator.estimate)
+            print(evaluator.estimate)
+        save_hist(f_scores, true_measure[0], f"{h5_path}-new")
+        print(f_scores)
