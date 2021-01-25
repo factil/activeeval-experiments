@@ -99,14 +99,14 @@ if __name__ == '__main__':
         true_measure = compute_true_measure(measure, true_label_dist, labels)
         print("true_measure", true_measure)
         result = []
-        # for _ in tqdm.tqdm(range(200)):
-        #     sampler = Sampler(StratifiedUniformSampler, 0.5, probs, [], [])
-        #     sampler.sample(lambda x: true_labels[x], 5000)
-        #     est = sampler.f_score_history()[-1]
-        #     result.append(est)
-        #     print(est)
-        # print(result)
-        # save_hist(result, true_measure[0], f"{h5_path}-base")
+        for _ in tqdm.tqdm(range(200)):
+            sampler = Sampler(StratifiedUniformSampler, 0.5, probs, [], [])
+            sampler.sample(lambda x: true_labels[x], 5000)
+            est = sampler.f_score_history()[-1]
+            result.append(est)
+            print(est)
+        print(result)
+        save_hist(result, true_measure[0], f"{h5_path}-base")
 
         f_scores = []
         for _ in tqdm.tqdm(range(200)):
@@ -124,16 +124,19 @@ if __name__ == '__main__':
                 pool = HierarchicalStratifiedPool(scores, tree_depth, n_children,
                                                   bins='csf', bins_hist=bins_hist)
 
-            oracle_estimator = HierarchicalStochasticOE(pool, labels)
+            oracle_estimator = HierarchicalDeterministicOE(pool, labels)
             proposal = AdaptiveVarMin(pool, measure, oracle_estimator)
             evaluator = Evaluator(pool, measure, proposal)
             n_queries = 5000
-            for _ in range(n_queries):
+            seen = set()
+            while len(seen) < n_queries:
                 instance_id, weight = evaluator.query()
+                if instance_id not in seen:
+                    seen.add(instance_id)
                 label = true_labels[instance_id]
                 evaluator.update(instance_id, label, weight)
 
             f_scores.append(evaluator.estimate)
             print(evaluator.estimate)
-        save_hist(f_scores, true_measure[0], f"{h5_path}-new")
+        save_hist(f_scores, true_measure[0], f"{h5_path}-new-det")
         print(f_scores)
