@@ -78,3 +78,15 @@ measure are stored in a different subdirectory, e.g. results for `f1-score`
 are stored at `results/f1-score`. Various diagnostic plots are saved under 
 this subdirectory in PDf format, as well as the complete sampling history 
 in compressed npz files.
+
+
+### Get comparison histogram between HierarchicalDeterministicOE and Base method
+```
+mkdir internal_modules && cd internal_modules
+git clone https://github.com/factil/sampling.git
+cd sampling
+pipenv install -e .
+
+python run_f1-score.py
+```
+result histogram pngs will be added in folder datasets/
