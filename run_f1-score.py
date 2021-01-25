@@ -17,7 +17,7 @@ from activeeval.proposals import (Passive, StaticVarMin, PartitionedStochasticOE
 from sampling.uniform_stratified import StratifiedUniformSampler
 from sampling.sampler import Sampler
 from sampling.stratification import Strata
-# Avoid issues with default TkAgg backend and multithreading
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -97,16 +97,31 @@ if __name__ == '__main__':
         true_label_dist = np.c_[1 - true_labels, true_labels]
         labels = np.asarray([0, 1])
         true_measure = compute_true_measure(measure, true_label_dist, labels)
+        print(h5_path)
         print("true_measure", true_measure)
+        print("len(labels)", len(true_labels))
         result = []
         for _ in tqdm.tqdm(range(200)):
-            sampler = Sampler(StratifiedUniformSampler, 0.5, probs, [], [])
-            sampler.sample(lambda x: true_labels[x], 5000)
-            est = sampler.f_score_history()[-1]
-            result.append(est)
-            print(est)
+            strata = Strata.from_usm(probs)
+            sampler = StratifiedUniformSampler(0.5, probs, strata)
+            seen = set()
+            n_queries = 5000
+            while len(seen) < n_queries:
+                idx = sampler.select()
+                instance_id = strata.sample_in_strata(idx)
+                if instance_id not in seen:
+                    seen.add(instance_id)
+                sampler.set(instance_id, true_labels[instance_id])
+
+            result.append(sampler.f_score_history()[-1])
+
+            # sampler = Sampler(StratifiedUniformSampler, 0.5, probs, [], [])
+            # sampler.sample(lambda x: true_labels[x], 5000)
+            # est = sampler.f_score_history()[-1]
+            # result.append(est)
+            # print(est)
         print(result)
-        save_hist(result, true_measure[0], f"{h5_path}-base")
+        save_hist(result, true_measure[0], f"{h5_path}-base-um")
 
         f_scores = []
         for _ in tqdm.tqdm(range(200)):
