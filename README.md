@@ -81,12 +81,14 @@ in compressed npz files.
 
 
 ### Get comparison histogram between HierarchicalDeterministicOE and Base method
+
+Create sampling repo in parallel directory
+
 ```
-mkdir internal_modules && cd internal_modules
-git clone https://github.com/factil/sampling.git
-cd sampling
-pipenv install -e .
+(cd ..; git clone https://github.com/factil/sampling.git)
+pip install -e ../sampling
 
 python run_f1-score.py
 ```
-result histogram pngs will be added in folder datasets/
+
+The resulting histogram pngs will be added in folder datasets/.
