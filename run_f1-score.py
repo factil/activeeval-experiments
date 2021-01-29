@@ -139,7 +139,11 @@ if __name__ == '__main__':
                 pool = HierarchicalStratifiedPool(scores, tree_depth, n_children,
                                                   bins='csf', bins_hist=bins_hist)
 
-            oracle_estimator = HierarchicalDeterministicOE(pool, labels)
+            oracle_estimator = HierarchicalDeterministicOE(pool, labels,
+                                                           prior=prior,
+                                                           em_max_iter=em_max_iter,
+                                                           em_tol=em_tol
+                                                           )
             proposal = AdaptiveVarMin(pool, measure, oracle_estimator)
             evaluator = Evaluator(pool, measure, proposal)
             n_queries = 5000
